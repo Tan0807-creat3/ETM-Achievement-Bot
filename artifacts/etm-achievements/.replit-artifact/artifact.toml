@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "ETM Achievements"
+description = "A personal achievement tracker for OWO players. Users record their own activity, track progress toward ETM-created achievements, and celebrate milestones without automating OWO commands."
+version = "1.0.0"
+id = "artifacts/etm-achievements"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22340
+
+[services.development]
+run = "pnpm --filter @workspace/etm-achievements run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/etm-achievements", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/etm-achievements/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22340"
+BASE_PATH = "/"

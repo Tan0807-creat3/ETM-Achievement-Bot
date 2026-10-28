@@ -1,16 +1,24 @@
 import {
+  ChannelType,
   Client,
   type ChatInputCommandInteraction,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
   MessageFlags,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
+  type Message,
 } from "discord.js";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, etmActionLogsTable, insertEtmActionLogSchema } from "@workspace/db";
+import {
+  db,
+  etmActionLogsTable,
+  etmGuildSettingsTable,
+  insertEtmActionLogSchema,
+} from "@workspace/db";
 import { logger } from "./logger";
 
 type ActionKind = "hunt" | "battle_win" | "checkin" | "collect";
@@ -18,9 +26,9 @@ type ActionTotals = Record<ActionKind, number>;
 
 const actionLabels: Record<ActionKind, string> = {
   hunt: "Lượt săn",
-  battle_win: "Trận thắng",
-  checkin: "Điểm danh",
-  collect: "Sưu tầm",
+  battle_win: "Lượt battle",
+  checkin: "Lượt daily",
+  collect: "Lượt xem zoo",
 };
 
 const achievements: Array<{
@@ -33,42 +41,42 @@ const achievements: Array<{
   {
     id: "first-hunt",
     title: "Bước chân đầu tiên",
-    description: "Ghi lại lượt săn đầu tiên của bạn.",
+    description: "Dùng lệnh hunt lần đầu.",
     action: "hunt",
     target: 1,
   },
   {
     id: "steady-hunter",
     title: "Thợ săn bền bỉ",
-    description: "Tự ghi nhận 10 lượt săn.",
+    description: "Dùng lệnh hunt 10 lần.",
     action: "hunt",
     target: 10,
   },
   {
     id: "first-victory",
-    title: "Chiến thắng đầu tay",
-    description: "Ghi lại trận thắng đầu tiên.",
+    title: "Trận chiến đầu tay",
+    description: "Dùng lệnh battle lần đầu.",
     action: "battle_win",
     target: 1,
   },
   {
     id: "battle-hardened",
-    title: "Vững tay chiến đấu",
-    description: "Tự ghi nhận 5 trận thắng.",
+    title: "Người mê so tài",
+    description: "Dùng lệnh battle 5 lần.",
     action: "battle_win",
     target: 5,
   },
   {
     id: "daily-regular",
     title: "Hẹn gặp mỗi ngày",
-    description: "Ghi nhận điểm danh 7 lần.",
+    description: "Dùng lệnh daily 7 lần.",
     action: "checkin",
     target: 7,
   },
   {
     id: "collector",
-    title: "Người gom chuyện hay",
-    description: "Tự ghi nhận 5 món sưu tầm.",
+    title: "Người khám phá sở thú",
+    description: "Dùng lệnh zoo 5 lần.",
     action: "collect",
     target: 5,
   },
@@ -76,7 +84,7 @@ const achievements: Array<{
 
 const etmCommand = new SlashCommandBuilder()
   .setName("etm")
-  .setDescription("Theo dõi thành tựu OWO bằng ghi nhận thủ công.")
+  .setDescription("Theo dõi thành tựu từ các lệnh OWO đã nhận diện.")
   .addSubcommand((subcommand) =>
     subcommand
       .setName("ghi")
@@ -88,9 +96,9 @@ const etmCommand = new SlashCommandBuilder()
           .setRequired(true)
           .addChoices(
             { name: "Lượt săn", value: "hunt" },
-            { name: "Trận thắng", value: "battle_win" },
-            { name: "Điểm danh", value: "checkin" },
-            { name: "Sưu tầm", value: "collect" },
+            { name: "Lượt battle", value: "battle_win" },
+            { name: "Lượt daily", value: "checkin" },
+            { name: "Lượt xem zoo", value: "collect" },
           ),
       )
       .addIntegerOption((option) =>
@@ -116,6 +124,142 @@ const etmCommand = new SlashCommandBuilder()
       .setName("top")
       .setDescription("Xem bảng xếp hạng ghi nhận của server."),
   );
+
+const setCommand = new SlashCommandBuilder()
+  .setName("set")
+  .setDescription("Chọn phạm vi ETM theo dõi lệnh OWO.")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("channel")
+      .setDescription("Chỉ theo dõi một kênh.")
+      .addChannelOption((option) =>
+        option
+          .setName("kenh")
+          .setDescription("Kênh OWO muốn theo dõi.")
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("all")
+      .setDescription("Theo dõi mọi kênh ETM có quyền xem."),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("off")
+      .setDescription("Tắt tự ghi nhận trong server này."),
+  );
+
+const OFFICIAL_OWO_BOT_ID = "408785106942164992";
+const autoTrackingEnabled = process.env.ETM_AUTO_TRACKING_ENABLED === "true";
+const commandActions: Record<string, ActionKind> = {
+  hunt: "hunt",
+  h: "hunt",
+  battle: "battle_win",
+  b: "battle_win",
+  fight: "battle_win",
+  daily: "checkin",
+  zoo: "collect",
+};
+
+type GuildMonitorSettings = typeof etmGuildSettingsTable.$inferSelect;
+
+const settingsCache = new Map<
+  string,
+  { settings: GuildMonitorSettings | null; expiresAt: number }
+>();
+
+const getGuildMonitorSettings = async (
+  guildId: string,
+): Promise<GuildMonitorSettings | null> => {
+  const cached = settingsCache.get(guildId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.settings;
+  }
+
+  const [settings] = await db
+    .select()
+    .from(etmGuildSettingsTable)
+    .where(eq(etmGuildSettingsTable.guildId, guildId))
+    .limit(1);
+
+  const value = settings ?? null;
+  settingsCache.set(guildId, {
+    settings: value,
+    expiresAt: Date.now() + 30_000,
+  });
+  return value;
+};
+
+const saveGuildMonitorSettings = async (
+  guildId: string,
+  channelId: string | null,
+  monitorAll: boolean,
+): Promise<void> => {
+  const [settings] = await db
+    .insert(etmGuildSettingsTable)
+    .values({ guildId, channelId, monitorAll })
+    .onConflictDoUpdate({
+      target: etmGuildSettingsTable.guildId,
+      set: { channelId, monitorAll, updatedAt: new Date() },
+    })
+    .returning();
+
+  if (settings) {
+    settingsCache.set(guildId, {
+      settings,
+      expiresAt: Date.now() + 30_000,
+    });
+  }
+};
+
+const parseOwoAction = (
+  content: string,
+): ActionKind | null => {
+  const match = content.trimStart().match(/^(?:owo|ow)\s+([a-z][a-z0-9_-]*)\b/i);
+  if (!match) {
+    return null;
+  }
+  return commandActions[match[1].toLowerCase()] ?? null;
+};
+
+const getAutomaticAction = (
+  message: Message,
+): { userId: string; action: ActionKind } | null => {
+  if (message.author.id === OFFICIAL_OWO_BOT_ID) {
+    const commandName = message.interaction?.commandName.toLowerCase();
+    const action = commandName ? commandActions[commandName] : undefined;
+    const userId = message.interaction?.user.id;
+    return action && userId ? { userId, action } : null;
+  }
+
+  if (message.author.bot) {
+    return null;
+  }
+
+  const action = parseOwoAction(message.content);
+  return action ? { userId: message.author.id, action } : null;
+};
+
+const recordAutomaticAction = async (
+  guildId: string,
+  userId: string,
+  action: ActionKind,
+): Promise<void> => {
+  const entry = insertEtmActionLogSchema.parse({
+    guildId,
+    userId,
+    action,
+    amount: 1,
+    sourceMessageId: null,
+  });
+
+  await db.insert(etmActionLogsTable).values(entry);
+
+  logger.info({ guildId, userId, action }, "Recorded an OwO action");
+};
 
 const getActionTotals = async (
   guildId: string,
@@ -168,7 +312,9 @@ const progressEmbed = (totals: ActionTotals): EmbedBuilder => {
       `Tổng lượt ghi nhận: **${totalActions}**\nThành tựu đã mở: **${unlockedCount}/${achievements.length}**`,
     )
     .addFields({ name: "Hoạt động", value: formatActionTotals(totals) })
-    .setFooter({ text: "Tiến độ dựa trên hành động bạn tự ghi nhận; ETM không xác minh với OWO." });
+    .setFooter({
+      text: "ETM đếm lệnh đã nhận diện, không xác minh kết quả từ OWO.",
+    });
 };
 
 const achievementsEmbed = (totals: ActionTotals): EmbedBuilder => {
@@ -184,7 +330,9 @@ const achievementsEmbed = (totals: ActionTotals): EmbedBuilder => {
     .setColor(0xe39c62)
     .setTitle("Bộ sưu tập thành tựu ETM")
     .setDescription(lines.join("\n\n"))
-    .setFooter({ text: "Thành tựu mở khi bạn tự ghi nhận đủ hành động." });
+    .setFooter({
+      text: "Thành tựu dựa trên lệnh OWO ETM nhận diện được.",
+    });
 };
 
 const handleRecord = async (
@@ -265,10 +413,46 @@ const handleLeaderboard = async (
         .setColor(0x26735f)
         .setTitle("Bảng xếp hạng server")
         .setDescription(description)
-        .setFooter({ text: "Xếp hạng theo tổng lượt người dùng tự ghi nhận." }),
+        .setFooter({ text: "Xếp hạng theo các lệnh OWO ETM nhận diện được." }),
     ],
     allowedMentions: { parse: [] },
   });
+};
+
+const handleSet = async (
+  interaction: ChatInputCommandInteraction,
+  guildId: string,
+): Promise<void> => {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.editReply("Chỉ quản trị viên server mới có thể đổi phạm vi theo dõi.");
+    return;
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "channel") {
+    const channel = interaction.options.getChannel("kenh", true);
+    if (channel.type !== ChannelType.GuildText) {
+      await interaction.editReply("Hãy chọn một kênh văn bản.");
+      return;
+    }
+
+    await saveGuildMonitorSettings(guildId, channel.id, false);
+    await interaction.editReply(
+      `Đã chọn ${channel} làm kênh theo dõi. ETM sẽ chỉ xử lý lệnh OWO nhận diện được trong kênh này.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật Message Content Intent trong Developer Portal."}`,
+    );
+    return;
+  }
+
+  if (subcommand === "all") {
+    await saveGuildMonitorSettings(guildId, null, true);
+    await interaction.editReply(
+      `Đã bật theo dõi lệnh OWO trong mọi kênh ETM có quyền xem.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật Message Content Intent trong Developer Portal."}`,
+    );
+    return;
+  }
+
+  await saveGuildMonitorSettings(guildId, null, false);
+  await interaction.editReply("Đã tắt tự ghi nhận trong server này.");
 };
 
 export async function startEtmBot(): Promise<void> {
@@ -277,19 +461,26 @@ export async function startEtmBot(): Promise<void> {
     throw new Error("DISCORD_BOT_TOKEN is required to start the ETM Discord bot.");
   }
 
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const intents = autoTrackingEnabled
+    ? [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+      ]
+    : [GatewayIntentBits.Guilds];
+  const client = new Client({ intents });
   const rest = new REST({ version: "10" }).setToken(token);
   const ready = new Promise<void>((resolve, reject) => {
     client.once(Events.ClientReady, async (readyClient) => {
       try {
         const applicationId = readyClient.user.id;
         await rest.put(Routes.applicationCommands(applicationId), {
-          body: [etmCommand.toJSON()],
+          body: [etmCommand.toJSON(), setCommand.toJSON()],
         });
 
         const inviteParams = new URLSearchParams({
           client_id: applicationId,
-          permissions: "2048",
+          permissions: "68608",
           scope: "bot applications.commands",
         });
         const inviteUrl = `https://discord.com/oauth2/authorize?${inviteParams.toString()}`;
@@ -310,11 +501,16 @@ export async function startEtmBot(): Promise<void> {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand() || interaction.commandName !== "etm") {
+    if (
+      !interaction.isChatInputCommand() ||
+      (interaction.commandName !== "etm" && interaction.commandName !== "set")
+    ) {
       return;
     }
 
-    const isLeaderboard = interaction.options.getSubcommand() === "top";
+    const isLeaderboard =
+      interaction.commandName === "etm" &&
+      interaction.options.getSubcommand() === "top";
     try {
       await interaction.deferReply(
         isLeaderboard ? {} : { flags: MessageFlags.Ephemeral },
@@ -322,6 +518,11 @@ export async function startEtmBot(): Promise<void> {
 
       if (!interaction.guildId) {
         await interaction.editReply("ETM chỉ hoạt động trong server Discord.");
+        return;
+      }
+
+      if (interaction.commandName === "set") {
+        await handleSet(interaction, interaction.guildId);
         return;
       }
 
@@ -375,6 +576,38 @@ export async function startEtmBot(): Promise<void> {
             logger.error({ err: replyErr }, "Failed to send ETM error response");
           });
       }
+    }
+  });
+
+  client.on(Events.MessageCreate, async (message) => {
+    if (!autoTrackingEnabled || !message.guildId) {
+      return;
+    }
+
+    try {
+      const settings = await getGuildMonitorSettings(message.guildId);
+      if (
+        !settings ||
+        (!settings.monitorAll && settings.channelId !== message.channelId)
+      ) {
+        return;
+      }
+
+      const detected = getAutomaticAction(message);
+      if (!detected) {
+        return;
+      }
+
+      await recordAutomaticAction(
+        message.guildId,
+        detected.userId,
+        detected.action,
+      );
+    } catch (err) {
+      logger.error(
+        { err, guildId: message.guildId },
+        "Failed to automatically track an OWO action",
+      );
     }
   });
 

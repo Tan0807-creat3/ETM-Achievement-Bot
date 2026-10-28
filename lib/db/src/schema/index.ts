@@ -18,3 +18,4 @@
 //   export type Post = typeof postsTable.$inferSelect;
 
 export * from "./etm-action-logs";
+export * from "./etm-guild-settings";

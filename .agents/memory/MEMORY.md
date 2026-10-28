@@ -1,1 +1,1 @@
-- [ETM bot scope](etm-bot-scope.md) — ETM tracks ETM-designed milestones from self-reported OWO actions in Discord; it must not automate OWO.
+- [ETM bot scope](etm-bot-scope.md) — ETM tracks recognized OWO commands in admin-selected channels; it never runs OWO commands itself.

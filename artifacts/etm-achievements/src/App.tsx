@@ -57,6 +57,23 @@ const ACTIONS: { kind: ActionKind; label: string; description: string; icon: typ
   { kind: 'daily', label: 'Điểm danh', description: 'Ghi thủ công lượt daily', icon: CalendarCheck },
   { kind: 'collection', label: 'Xem zoo', description: 'Ghi thủ công lượt mở zoo', icon: Layers3 },
 ];
+const PROGRESS_LABELS: Record<ActionKind, string> = {
+  hunt: 'lượt săn',
+  battle: 'chiến thắng battle',
+  daily: 'lượt điểm danh',
+  collection: 'lượt mở zoo',
+};
+const createMilestones = (
+  kind: ActionKind,
+  milestones: [id: string, title: string, goal: number][],
+) => milestones.map(([id, title, goal]) => ({
+  id,
+  title,
+  description: `Đạt ${goal} ${PROGRESS_LABELS[kind]}.`,
+  kind,
+  goal,
+  mark: String(goal).padStart(2, '0'),
+}));
 const ACHIEVEMENTS = [
   { id: 'first-hunt', title: 'Mẻ săn đầu tiên', description: 'Tự ghi thủ công kết quả hunt đầu tiên.', kind: 'hunt' as const, goal: 1, mark: '01' },
   { id: 'steady-hunter', title: 'Thợ săn bền bỉ', description: 'Tự ghi thủ công 10 lượt hunt.', kind: 'hunt' as const, goal: 10, mark: '10' },
@@ -70,6 +87,64 @@ const ACHIEVEMENTS = [
   { id: 'daily-veteran', title: 'Thói quen bền lâu', description: 'Tự ghi thủ công 30 lượt daily.', kind: 'daily' as const, goal: 30, mark: '30' },
   { id: 'zoo-visitor', title: 'Lần đầu ghé sở thú', description: 'Tự ghi thủ công lần mở zoo đầu tiên.', kind: 'collection' as const, goal: 1, mark: '01' },
   { id: 'zoo-explorer', title: 'Người khám phá sở thú', description: 'Tự ghi thủ công 25 lượt mở zoo.', kind: 'collection' as const, goal: 25, mark: '25' },
+  ...createMilestones('hunt', [
+    ['new-trail', 'Dấu chân mới', 2],
+    ['warming-up-hunter', 'Thợ săn nhập cuộc', 5],
+    ['hunt-twenty', 'Hai mươi chuyến săn', 20],
+    ['expanded-map', 'Bản đồ mở rộng', 30],
+    ['tracker', 'Kẻ truy dấu', 75],
+    ['professional-hunter', 'Thợ săn chuyên nghiệp', 150],
+    ['wild-explorer', 'Nhà thám hiểm hoang dã', 250],
+    ['wild-spirit', 'Linh hồn hoang dã', 500],
+    ['wilderness-legend', 'Huyền thoại vùng hoang dã', 1000],
+    ['beast-scholar', 'Bách thú kỳ tài', 1500],
+    ['grand-hunter', 'Đại thợ săn', 2500],
+    ['wildland-ruler', 'Thống lĩnh hoang dã', 5000],
+  ]),
+  ...createMilestones('battle', [
+    ['second-victory', 'Thắng lợi thứ hai', 2],
+    ['arena-rhythm', 'Bắt nhịp đấu trường', 3],
+    ['battle-ten', 'Chiến binh chủ lực', 10],
+    ['battle-twenty-five', 'Kẻ chinh phục', 25],
+    ['battle-fifty', 'Đấu trường là nhà', 50],
+    ['battle-seventy-five', 'Bảy mươi lăm lần khải hoàn', 75],
+    ['century-of-wins', 'Trăm trận khải hoàn', 100],
+    ['arena-legend', 'Huyền thoại võ đài', 200],
+    ['victory-captain', 'Đội trưởng chiến thắng', 300],
+    ['battle-five-hundred', 'Võ thần', 500],
+    ['battle-strategist', 'Chiến lược gia', 750],
+    ['arena-lord', 'Chúa tể đấu trường', 1000],
+    ['battle-general', 'Bách chiến đại tướng', 1500],
+  ]),
+  ...createMilestones('daily', [
+    ['second-daily', 'Ngày thứ hai', 2],
+    ['daily-rhythm', 'Giữ nhịp mỗi ngày', 3],
+    ['two-weeks-present', 'Hai tuần kiên trì', 14],
+    ['daily-fifty', 'Năm mươi lần ghé thăm', 50],
+    ['daily-seventy-five', 'Mỗi ngày tiến bước', 75],
+    ['hundred-day-visitor', 'Trăm lần điểm danh', 100],
+    ['golden-routine', 'Thói quen vàng', 150],
+    ['daily-two-hundred', 'Điểm danh bền bỉ', 200],
+    ['year-of-checkins', 'Một năm đồng hành', 365],
+    ['daily-five-hundred', 'Lời chào thứ năm trăm', 500],
+    ['daily-seven-fifty', 'Bền gan mỗi ngày', 750],
+    ['familiar-friend', 'Người bạn thân quen', 1000],
+    ['daily-legend', 'Nhịp sống huyền thoại', 1500],
+  ]),
+  ...createMilestones('collection', [
+    ['zoo-regular', 'Khách quen sở thú', 5],
+    ['animal-caretaker', 'Người chăm sóc muông thú', 10],
+    ['starter-collector', 'Nhà sưu tầm nhập môn', 50],
+    ['growing-catalog', 'Danh mục mở rộng', 75],
+    ['zoo-specialist', 'Chuyên gia sở thú', 100],
+    ['zoo-keeper', 'Người chăm thú', 200],
+    ['grand-collection', 'Bộ sưu tập lớn', 300],
+    ['zoo-librarian', 'Thủ thư sở thú', 500],
+    ['master-collector', 'Bậc thầy sưu tầm', 750],
+    ['zoo-thousand', 'Một nghìn lần khám phá', 1000],
+    ['wildlife-curator', 'Giám tuyển hoang dã', 1500],
+    ['living-museum', 'Bảo tàng sống', 2000],
+  ]),
 ];
 
 const emptyData: AppData = {
@@ -186,18 +261,18 @@ function Home() {
           <div>
             <div className="eyebrow"><Sparkles size={13} strokeWidth={2.5} /> Nhật ký hành trình OWO</div>
             <h1 className="hero-title">Mỗi dấu mốc<br />là một <em>chiến tích.</em></h1>
-            <p className="hero-copy">Một không gian thành tựu cá nhân, đồng bộ các kết quả OwO được máy chủ xác nhận khi có thể nhận diện. Dữ liệu thủ công trên thiết bị vẫn luôn được tách riêng.</p>
+            <p className="hero-copy">Theo dõi thành tựu từ các lệnh hunt, battle, daily và zoo mà ETM nhận diện được trong kênh đã cấu hình. Ghi chú thủ công trên thiết bị luôn được tách riêng; không phải mọi hoạt động OwO đều có thể được nhận diện.</p>
           </div>
           <div className="hero-art" aria-label="Minh họa hành trình thành tựu">
             <span className="orbit" /><span className="orbit two" /><span className="orbit three" />
             <span className="spark s1" /><span className="spark s2" />
-            <div className="art-core"><strong>{latestAchievement ? 'Đang tiến bước' : 'Bắt đầu hành trình'}</strong><span>{unlockedCount} / {ACHIEVEMENTS.length} thành tựu thủ công</span></div>
+            <div className="art-core"><strong>{latestAchievement ? 'Đang tiến bước' : 'Bắt đầu hành trình'}</strong><span>{unlockedCount} / {ACHIEVEMENTS.length} thành tựu trên thiết bị</span></div>
           </div>
         </section>
 
         <section className="panel discord-panel" aria-labelledby="discord-heading" data-testid="section-discord-sync">
           <div className="panel-head">
-            <div><h2 className="panel-title" id="discord-heading">Tiến trình Discord</h2><div className="panel-kicker">Dữ liệu do máy chủ ETM xác nhận, tách biệt với ghi chú thủ công</div></div>
+            <div><h2 className="panel-title" id="discord-heading">Tiến trình Discord</h2><div className="panel-kicker">Tự ghi nhận lệnh OwO được hỗ trợ trong phạm vi kênh do quản trị viên cấu hình</div></div>
             <span className={`sync-pill ${authenticated ? 'is-connected' : ''}`} data-testid="status-discord-session">{session.isLoading ? 'ĐANG KIỂM TRA' : authenticated ? 'ĐÃ KẾT NỐI' : 'CHƯA KẾT NỐI'}</span>
           </div>
           <div className="discord-content">
@@ -274,7 +349,7 @@ function Home() {
                   </div>
                   <button type="button" className="primary-button" onClick={recordAction} data-testid="button-record-action"><Plus size={15} /> Ghi dấu mốc</button>
                 </div>
-                <p className="record-hint">Tiến trình chỉ thay đổi khi bạn chủ động ghi lại. Không có kết nối hay thao tác tự động với OWO.</p>
+                <p className="record-hint">Mục này chỉ lưu ghi chú thủ công trên thiết bị. Tiến trình Discord tự ghi nhận nằm riêng ở phía trên.</p>
               </div>
             </section>
 

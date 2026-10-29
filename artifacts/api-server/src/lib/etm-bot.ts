@@ -299,18 +299,18 @@ const progressEmbed = (totals: ActionTotals): EmbedBuilder => {
 const achievementsEmbed = (totals: ActionTotals): EmbedBuilder => {
   const lines = etmAchievements.map((achievement) => {
     const current = totals[achievement.action];
-    const status =
-      current >= achievement.target ? "ĐÃ MỞ KHÓA" : "ĐANG THEO DÕI";
-
-    return `**${achievement.title}** — ${status} (${Math.min(current, achievement.target)}/${achievement.target})\n${achievement.description}`;
+    const status = current >= achievement.target ? "✓" : "·";
+    return `${status} **${achievement.title}** ${Math.min(current, achievement.target)}/${achievement.target}`;
   });
 
   return new EmbedBuilder()
     .setColor(0xe39c62)
     .setTitle("Bộ sưu tập thành tựu ETM")
-    .setDescription(lines.join("\n\n"))
+    .setDescription(
+      `**${etmAchievements.length} thành tựu** · ✓ đã mở · · đang theo đuổi\n\n${lines.join("\n")}`,
+    )
     .setFooter({
-      text: "Thành tựu mở khi ETM nhận diện kết quả thành công từ OwO.",
+      text: "Chỉ tính phản hồi thành công được nhận diện. Dashboard có mô tả chi tiết.",
     });
 };
 
@@ -374,7 +374,7 @@ const handleSet = async (
 
     await saveGuildMonitorSettings(guildId, channel.id, false);
     await interaction.editReply(
-      `Đã chọn ${channel} làm kênh theo dõi. ETM sẽ chỉ xử lý lệnh OWO nhận diện được trong kênh này.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật Message Content Intent trong Developer Portal."}`,
+      `Đã chọn ${channel} làm kênh theo dõi. ETM chỉ xử lý lệnh và phản hồi OwO được hỗ trợ trong kênh này.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật ETM_AUTO_TRACKING_ENABLED và Message Content Intent trong Developer Portal."}`,
     );
     return;
   }
@@ -382,7 +382,7 @@ const handleSet = async (
   if (subcommand === "all") {
     await saveGuildMonitorSettings(guildId, null, true);
     await interaction.editReply(
-      `Đã bật theo dõi lệnh OWO trong mọi kênh ETM có quyền xem.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật Message Content Intent trong Developer Portal."}`,
+      `Đã bật theo dõi lệnh và phản hồi OwO được hỗ trợ trong mọi kênh ETM có quyền xem.${autoTrackingEnabled ? "" : "\nTự ghi nhận đang chờ bật ETM_AUTO_TRACKING_ENABLED và Message Content Intent trong Developer Portal."}`,
     );
     return;
   }

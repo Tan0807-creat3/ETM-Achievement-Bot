@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import Terms from '@/pages/terms';
+import Privacy from '@/pages/privacy';
 import {
+  Link,
   Route,
   Switch,
   useLocation,
@@ -23,7 +27,19 @@ import {
   Swords,
   Target,
   Trophy,
+  LogIn,
+  LogOut,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
+import {
+  getGetAuthSessionQueryKey,
+  getGetEtmProgressQueryKey,
+  useDeleteEtmProgress,
+  useGetAuthSession,
+  useGetEtmProgress,
+  useLogoutDiscord,
+} from '@workspace/api-client-react';
 
 type ActionKind = 'hunt' | 'battle' | 'daily' | 'collection';
 type Activity = { id: string; kind: ActionKind; amount: number; createdAt: number };
@@ -36,18 +52,24 @@ type AppData = {
 
 const STORAGE_KEY = 'etm-achievements-v1';
 const ACTIONS: { kind: ActionKind; label: string; description: string; icon: typeof Target }[] = [
-  { kind: 'hunt', label: 'Lượt săn', description: 'Ghi nhận lượt săn', icon: Target },
-  { kind: 'battle', label: 'Trận thắng', description: 'Ghi nhận trận thắng', icon: Swords },
-  { kind: 'daily', label: 'Điểm danh', description: 'Ghi nhận điểm danh', icon: CalendarCheck },
-  { kind: 'collection', label: 'Sưu tầm', description: 'Thêm vào bộ sưu tập', icon: Layers3 },
+  { kind: 'hunt', label: 'Lượt săn', description: 'Ghi thủ công lượt săn', icon: Target },
+  { kind: 'battle', label: 'Trận thắng', description: 'Ghi thủ công trận thắng', icon: Swords },
+  { kind: 'daily', label: 'Điểm danh', description: 'Ghi thủ công lượt daily', icon: CalendarCheck },
+  { kind: 'collection', label: 'Xem zoo', description: 'Ghi thủ công lượt mở zoo', icon: Layers3 },
 ];
 const ACHIEVEMENTS = [
-  { id: 'first-hunt', title: 'Bước chân đầu tiên', description: 'Ghi lại lượt săn đầu tiên của bạn.', kind: 'hunt' as const, goal: 1, mark: '01' },
-  { id: 'hunter-10', title: 'Thợ săn bền bỉ', description: 'Tự ghi nhận 10 lượt săn.', kind: 'hunt' as const, goal: 10, mark: '10' },
-  { id: 'first-win', title: 'Chiến thắng đầu tay', description: 'Ghi lại trận thắng đầu tiên.', kind: 'battle' as const, goal: 1, mark: 'W' },
-  { id: 'win-5', title: 'Vững tay chiến đấu', description: 'Đạt 5 trận thắng được ghi nhận.', kind: 'battle' as const, goal: 5, mark: '05' },
-  { id: 'daily-7', title: 'Hẹn gặp mỗi ngày', description: 'Ghi nhận 7 lần điểm danh.', kind: 'daily' as const, goal: 7, mark: '7D' },
-  { id: 'collector-5', title: 'Người gom chuyện hay', description: 'Thêm 5 món vào bộ sưu tập.', kind: 'collection' as const, goal: 5, mark: '05' },
+  { id: 'first-hunt', title: 'Mẻ săn đầu tiên', description: 'Tự ghi thủ công kết quả hunt đầu tiên.', kind: 'hunt' as const, goal: 1, mark: '01' },
+  { id: 'steady-hunter', title: 'Thợ săn bền bỉ', description: 'Tự ghi thủ công 10 lượt hunt.', kind: 'hunt' as const, goal: 10, mark: '10' },
+  { id: 'dedicated-hunter', title: 'Dấu chân trên 50 vùng đất', description: 'Tự ghi thủ công 50 lượt hunt.', kind: 'hunt' as const, goal: 50, mark: '50' },
+  { id: 'legendary-hunter', title: 'Huyền thoại săn bắt', description: 'Tự ghi thủ công 100 lượt hunt.', kind: 'hunt' as const, goal: 100, mark: '100' },
+  { id: 'first-victory', title: 'Chiến thắng đầu tay', description: 'Tự ghi thủ công chiến thắng đầu tiên.', kind: 'battle' as const, goal: 1, mark: 'W' },
+  { id: 'battle-hardened', title: 'Đấu trường quen thuộc', description: 'Tự ghi thủ công 5 chiến thắng battle.', kind: 'battle' as const, goal: 5, mark: '05' },
+  { id: 'arena-regular', title: 'Võ đài kỳ cựu', description: 'Tự ghi thủ công 20 chiến thắng battle.', kind: 'battle' as const, goal: 20, mark: '20' },
+  { id: 'first-daily', title: 'Mở đầu ngày mới', description: 'Tự ghi thủ công lượt daily đầu tiên.', kind: 'daily' as const, goal: 1, mark: '01' },
+  { id: 'daily-regular', title: 'Hẹn gặp mỗi ngày', description: 'Tự ghi thủ công 7 lượt daily.', kind: 'daily' as const, goal: 7, mark: '7D' },
+  { id: 'daily-veteran', title: 'Thói quen bền lâu', description: 'Tự ghi thủ công 30 lượt daily.', kind: 'daily' as const, goal: 30, mark: '30' },
+  { id: 'zoo-visitor', title: 'Lần đầu ghé sở thú', description: 'Tự ghi thủ công lần mở zoo đầu tiên.', kind: 'collection' as const, goal: 1, mark: '01' },
+  { id: 'zoo-explorer', title: 'Người khám phá sở thú', description: 'Tự ghi thủ công 25 lượt mở zoo.', kind: 'collection' as const, goal: 25, mark: '25' },
 ];
 
 const emptyData: AppData = {
@@ -81,6 +103,16 @@ const formatDate = (timestamp: number) =>
   new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(timestamp);
 
 function Home() {
+  const queryClient = useQueryClient();
+  const session = useGetAuthSession({ query: { queryKey: getGetAuthSessionQueryKey() } });
+  const authenticated = session.data?.authenticated === true;
+  const progress = useGetEtmProgress({
+    query: { enabled: authenticated, queryKey: getGetEtmProgressQueryKey() },
+  });
+  const logout = useLogoutDiscord();
+  const deleteProgress = useDeleteEtmProgress();
+  const [confirmDeleteSynced, setConfirmDeleteSynced] = useState(false);
+  const [authNotice, setAuthNotice] = useState('');
   const [data, setData] = useState<AppData>(() => loadData());
   const [selected, setSelected] = useState<ActionKind>('hunt');
   const [amount, setAmount] = useState(1);
@@ -154,21 +186,68 @@ function Home() {
           <div>
             <div className="eyebrow"><Sparkles size={13} strokeWidth={2.5} /> Nhật ký hành trình OWO</div>
             <h1 className="hero-title">Mỗi dấu mốc<br />là một <em>chiến tích.</em></h1>
-            <p className="hero-copy">Tự ghi lại những gì bạn đã làm, rồi nhìn hành trình nhỏ của mình dần đầy lên. Thành tựu ở đây được mở khóa từ những dấu mốc bạn chủ động nhập.</p>
+            <p className="hero-copy">Một không gian thành tựu cá nhân, đồng bộ các kết quả OwO được máy chủ xác nhận khi có thể nhận diện. Dữ liệu thủ công trên thiết bị vẫn luôn được tách riêng.</p>
           </div>
           <div className="hero-art" aria-label="Minh họa hành trình thành tựu">
             <span className="orbit" /><span className="orbit two" /><span className="orbit three" />
             <span className="spark s1" /><span className="spark s2" />
-            <div className="art-core"><strong>{latestAchievement ? 'Đang tiến bước' : 'Bắt đầu hành trình'}</strong><span>{unlockedCount} / {ACHIEVEMENTS.length} thành tựu</span></div>
+            <div className="art-core"><strong>{latestAchievement ? 'Đang tiến bước' : 'Bắt đầu hành trình'}</strong><span>{unlockedCount} / {ACHIEVEMENTS.length} thành tựu thủ công</span></div>
+          </div>
+        </section>
+
+        <section className="panel discord-panel" aria-labelledby="discord-heading" data-testid="section-discord-sync">
+          <div className="panel-head">
+            <div><h2 className="panel-title" id="discord-heading">Tiến trình Discord</h2><div className="panel-kicker">Dữ liệu do máy chủ ETM xác nhận, tách biệt với ghi chú thủ công</div></div>
+            <span className={`sync-pill ${authenticated ? 'is-connected' : ''}`} data-testid="status-discord-session">{session.isLoading ? 'ĐANG KIỂM TRA' : authenticated ? 'ĐÃ KẾT NỐI' : 'CHƯA KẾT NỐI'}</span>
+          </div>
+          <div className="discord-content">
+            {session.isLoading ? <div className="sync-state" data-testid="status-session-loading"><span className="skeleton-bar" /><span className="skeleton-bar short" /></div> :
+              session.isError ? <div className="sync-message error" role="alert" data-testid="status-session-error"><AlertTriangle size={16} />Không thể kiểm tra phiên Discord. <button type="button" onClick={() => session.refetch()} data-testid="button-retry-session">Thử lại</button></div> :
+              authenticated ? <div className="connected-row">
+                <div className="discord-avatar" aria-hidden="true">{(session.data?.user?.globalName || session.data?.user?.username || 'D').slice(0, 1).toUpperCase()}</div>
+                <div className="connected-copy"><strong data-testid="text-discord-user">{session.data?.user?.globalName || session.data?.user?.username || 'Tài khoản Discord'}</strong><span>Đã kết nối để xem kết quả được ETM nhận diện</span></div>
+                <button className="quiet-button" type="button" disabled={logout.isPending} onClick={() => logout.mutate(undefined, { onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: getGetAuthSessionQueryKey() }); await queryClient.invalidateQueries({ queryKey: getGetEtmProgressQueryKey() }); setAuthNotice('Đã đăng xuất Discord.'); }, onError: () => setAuthNotice('Không thể đăng xuất. Vui lòng thử lại.') })} data-testid="button-discord-signout"><LogOut size={14} />{logout.isPending ? 'Đang đăng xuất' : 'Đăng xuất'}</button>
+              </div> : <div className="connected-row">
+                <div className="sync-copy"><strong>Kết nối để xem dấu mốc đã đồng bộ</strong><span>ETM chỉ hiển thị dữ liệu hoạt động mà hệ thống có thể nhận diện từ máy chủ.</span></div>
+                <a className="primary-button connect-button" href="/api/auth/discord/start" data-testid="link-discord-connect"><LogIn size={15} /> Kết nối Discord</a>
+              </div>}
+            {authenticated && <div className="synced-data" data-testid="section-synced-progress">
+              <div className="synced-heading"><strong>Đã đồng bộ</strong><span>{progress.isLoading ? 'Đang tải tiến trình…' : progress.data ? `${progress.data.guildCount} máy chủ` : 'Từ tài khoản Discord'}</span></div>
+              {progress.isLoading ? <div className="sync-state" data-testid="status-progress-loading"><span className="skeleton-bar" /><span className="skeleton-bar short" /></div> :
+                progress.isError ? <div className="sync-message error" role="alert" data-testid="status-progress-error">Không tải được tiến trình đã đồng bộ. <button type="button" onClick={() => progress.refetch()} data-testid="button-retry-progress">Thử lại</button></div> :
+                progress.data ? <div className="synced-progress-body">
+                  {progress.data.totalActions === 0 && <div className="sync-message" data-testid="empty-synced-progress">Chưa có hoạt động nào được ghi nhận cho tài khoản này. Các kết quả có thể không phải lúc nào cũng được nhận diện.</div>}
+                  <div className="synced-summary">
+                    <div><span>Tổng hoạt động</span><strong data-testid="text-synced-total">{progress.data.totalActions}</strong></div>
+                    <div><span>Lượt săn</span><strong>{progress.data.totals.hunt}</strong></div>
+                    <div><span>Trận thắng</span><strong>{progress.data.totals.battle_win}</strong></div>
+                    <div><span>Điểm danh</span><strong>{progress.data.totals.checkin}</strong></div>
+                    <div><span>Sưu tầm</span><strong>{progress.data.totals.collect}</strong></div>
+                    <div className="synced-achievements"><span>Thành tựu đã mở</span><strong>{progress.data.achievements.filter(item => item.unlocked).length} / {progress.data.achievements.length}</strong></div>
+                  </div>
+                  <section className="synced-achievement-section" aria-labelledby="synced-achievements-title" data-testid="section-synced-achievements">
+                    <div className="synced-achievement-heading"><div><h3 id="synced-achievements-title">Thành tựu Discord</h3><p>Dựa trên dữ liệu ETM đã đồng bộ, độc lập với nhật ký thủ công trên thiết bị.</p></div><span>{progress.data.achievements.filter(item => item.unlocked).length} / {progress.data.achievements.length}</span></div>
+                    {progress.data.achievements.length > 0 ? <div className="synced-achievement-list">
+                      {progress.data.achievements.map(item => <article className={`synced-achievement ${item.unlocked ? 'unlocked' : ''}`} key={item.id} data-testid={`synced-achievement-${item.id}`}>
+                        <div className="synced-achievement-top"><div><h4>{item.title}</h4><p>{item.description}</p></div><span className="synced-achievement-state" data-testid={`status-synced-achievement-${item.id}`}>{item.unlocked ? 'ĐÃ MỞ' : 'ĐANG THEO ĐUỔI'}</span></div>
+                        <div className="synced-progress-track" role="progressbar" aria-label={`Tiến độ ${item.title}`} aria-valuemin={0} aria-valuemax={item.target} aria-valuenow={Math.min(item.current, item.target)}><span style={{ width: `${item.target > 0 ? Math.min(100, (item.current / item.target) * 100) : 0}%` }} /></div>
+                        <div className="synced-progress-label"><span>{item.unlocked ? 'Đã hoàn thành' : 'Tiến độ'}</span><strong>{item.current} / {item.target}</strong></div>
+                      </article>)}
+                    </div> : <div className="sync-message" data-testid="empty-synced-achievements">Chưa có thành tựu Discord để hiển thị.</div>}
+                  </section>
+                  {progress.data.recentActions.length > 0 && <div className="synced-recent" data-testid="list-synced-activity"><span>Dấu mốc gần đây</span>{progress.data.recentActions.slice(0, 4).map(entry => <div key={entry.id} data-testid={`synced-activity-${entry.id}`}><span>{({ hunt: 'Lượt săn', battle_win: 'Trận thắng', checkin: 'Điểm danh', collect: 'Sưu tầm' })[entry.action]}</span><span>+{entry.amount} · {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(entry.createdAt))}</span></div>)}</div>}
+                </div> : <div className="sync-message" data-testid="empty-synced-progress">Tiến trình chưa sẵn sàng.</div>}
+              <div className="delete-sync-row"><span>Xóa hoạt động ETM đã lưu trên tài khoản. Tiến trình thủ công trên thiết bị không bị ảnh hưởng.</span><button className="reset-button" type="button" onClick={() => setConfirmDeleteSynced(true)} disabled={deleteProgress.isPending} data-testid="button-open-delete-synced"><Trash2 size={13} /> Xóa dữ liệu đã đồng bộ</button></div>
+            </div>}
           </div>
         </section>
 
         <section aria-label="Tổng quan tiến trình">
           <div className="metrics">
-            <Metric label="Tổng dấu mốc" value={total} detail="lần đã ghi" />
-            <Metric label="Lượt săn" value={data.counts.hunt} detail="được tự ghi nhận" />
-            <Metric label="Trận thắng" value={data.counts.battle} detail="được tự ghi nhận" />
-            <Metric label="Đã mở khóa" value={unlockedCount} detail={`trên ${ACHIEVEMENTS.length} thành tựu`} />
+            <Metric label="Dấu mốc thủ công" value={total} detail="trên thiết bị này" />
+            <Metric label="Lượt săn" value={data.counts.hunt} detail="ghi thủ công" />
+            <Metric label="Trận thắng" value={data.counts.battle} detail="ghi thủ công" />
+            <Metric label="Thành tựu thủ công" value={unlockedCount} detail={`trên ${ACHIEVEMENTS.length} thành tựu`} />
           </div>
         </section>
 
@@ -201,7 +280,7 @@ function Home() {
 
             <section className="achievements-section" aria-labelledby="achievements-heading">
               <div className="section-heading">
-                <div><h2 id="achievements-heading">Bộ sưu tập thành tựu</h2><p>Những cột mốc do ETM tuyển chọn, mở khóa theo nhật ký của bạn.</p></div>
+                <div><h2 id="achievements-heading">Thành tựu thủ công</h2><p>Mở khóa theo nhật ký bạn ghi trên thiết bị này, độc lập với tiến trình Discord.</p></div>
                 <span className="mono" style={{ color: '#758378', fontSize: 11 }}>{unlockedCount} / {ACHIEVEMENTS.length} đã đạt</span>
               </div>
               <div className="achievement-grid">
@@ -225,7 +304,7 @@ function Home() {
 
           <aside className="side-stack">
             <section className="panel" aria-labelledby="profile-heading">
-              <div className="panel-head"><div><h2 className="panel-title" id="profile-heading">Góc của bạn</h2><div className="panel-kicker">Chỉ lưu trên thiết bị này</div></div><span className="achievement-stamp"><Pencil size={15} /></span></div>
+                <div className="panel-head"><div><h2 className="panel-title" id="profile-heading">Nhật ký thủ công</h2><div className="panel-kicker">Chỉ lưu trên thiết bị này, không phải dữ liệu Discord</div></div><span className="achievement-stamp"><Pencil size={15} /></span></div>
               <div className="profile-content">
                 {editingName ? (
                   <form onSubmit={event => { event.preventDefault(); saveName(); }}>
@@ -266,7 +345,7 @@ function Home() {
           </aside>
         </div>
 
-        <footer className="footnote"><span><strong>ETM Achievements</strong> là công cụ theo dõi cá nhân do cộng đồng tạo ra, không phải sản phẩm chính thức của OWO.</span></footer>
+        <footer className="footnote"><span><strong>ETM Achievements</strong> là công cụ theo dõi cá nhân do cộng đồng tạo ra, không liên kết với OwO hoặc Discord.</span><nav className="legal-links" aria-label="Liên kết pháp lý"><Link href="/terms" data-testid="link-terms-footer">Điều khoản</Link><Link href="/privacy" data-testid="link-privacy-footer">Quyền riêng tư</Link><a href="mailto:tannguyenthanh498@gmail.com" data-testid="link-contact-footer">Liên hệ</a></nav></footer>
       </div>
 
       {notice && <div className="notice" role="status" data-testid="status-notice"><Check size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />{notice}</div>}
@@ -280,6 +359,18 @@ function Home() {
           </div>
         </section>
       </div>}
+      {confirmDeleteSynced && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setConfirmDeleteSynced(false); }}>
+        <section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-synced-title" data-testid="dialog-delete-synced-confirm">
+          <h3 id="delete-synced-title">Xóa hoạt động đã đồng bộ?</h3>
+          <p>Thao tác này xóa các bản ghi hoạt động ETM liên kết với tài khoản Discord của bạn. Dữ liệu thủ công lưu trong trình duyệt sẽ được giữ nguyên.</p>
+          {deleteProgress.isError && <p className="dialog-error" role="alert" data-testid="status-delete-error">Không thể xóa dữ liệu. Vui lòng thử lại.</p>}
+          <div className="modal-actions">
+            <button type="button" className="quiet-button" disabled={deleteProgress.isPending} onClick={() => setConfirmDeleteSynced(false)} data-testid="button-cancel-delete-synced">Hủy</button>
+            <button type="button" className="danger-button" disabled={deleteProgress.isPending} onClick={() => deleteProgress.mutate(undefined, { onSuccess: async () => { setConfirmDeleteSynced(false); await queryClient.invalidateQueries({ queryKey: getGetEtmProgressQueryKey() }); await queryClient.invalidateQueries({ queryKey: getGetAuthSessionQueryKey() }); setAuthNotice('Đã xóa hoạt động ETM đã đồng bộ.'); }, onError: () => undefined })} data-testid="button-confirm-delete-synced">{deleteProgress.isPending ? 'Đang xóa…' : 'Xóa hoạt động'}</button>
+          </div>
+        </section>
+      </div>}
+      {authNotice && <div className="notice" role="status" data-testid="status-auth-notice">{authNotice}<button type="button" className="notice-dismiss" onClick={() => setAuthNotice('')} aria-label="Đóng thông báo">×</button></div>}
     </main>
   );
 }
@@ -290,7 +381,7 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
 
 const queryClient = new QueryClient();
 function Router() {
-  return <RoutedErrorBoundary><Switch><Route path="/" component={Home} /><Route component={NotFound} /></Switch></RoutedErrorBoundary>;
+  return <RoutedErrorBoundary><Switch><Route path="/" component={Home} /><Route path="/terms" component={Terms} /><Route path="/privacy" component={Privacy} /><Route component={NotFound} /></Switch></RoutedErrorBoundary>;
 }
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   const [location] = useLocation();

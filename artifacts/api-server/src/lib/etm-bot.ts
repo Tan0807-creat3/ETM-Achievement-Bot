@@ -12,7 +12,7 @@ import {
   SlashCommandBuilder,
   type Message,
 } from "discord.js";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   etmActionLogsTable,
@@ -20,95 +20,18 @@ import {
   insertEtmActionLogSchema,
 } from "@workspace/db";
 import { logger } from "./logger";
+import {
+  etmAchievements,
+  etmActionLabels,
+  type EtmActionKind,
+} from "./etm-achievements";
 
-type ActionKind = "hunt" | "battle_win" | "checkin" | "collect";
+type ActionKind = EtmActionKind;
 type ActionTotals = Record<ActionKind, number>;
-
-const actionLabels: Record<ActionKind, string> = {
-  hunt: "Lượt săn",
-  battle_win: "Lượt battle",
-  checkin: "Lượt daily",
-  collect: "Lượt xem zoo",
-};
-
-const achievements: Array<{
-  id: string;
-  title: string;
-  description: string;
-  action: ActionKind;
-  target: number;
-}> = [
-  {
-    id: "first-hunt",
-    title: "Bước chân đầu tiên",
-    description: "Dùng lệnh hunt lần đầu.",
-    action: "hunt",
-    target: 1,
-  },
-  {
-    id: "steady-hunter",
-    title: "Thợ săn bền bỉ",
-    description: "Dùng lệnh hunt 10 lần.",
-    action: "hunt",
-    target: 10,
-  },
-  {
-    id: "first-victory",
-    title: "Trận chiến đầu tay",
-    description: "Dùng lệnh battle lần đầu.",
-    action: "battle_win",
-    target: 1,
-  },
-  {
-    id: "battle-hardened",
-    title: "Người mê so tài",
-    description: "Dùng lệnh battle 5 lần.",
-    action: "battle_win",
-    target: 5,
-  },
-  {
-    id: "daily-regular",
-    title: "Hẹn gặp mỗi ngày",
-    description: "Dùng lệnh daily 7 lần.",
-    action: "checkin",
-    target: 7,
-  },
-  {
-    id: "collector",
-    title: "Người khám phá sở thú",
-    description: "Dùng lệnh zoo 5 lần.",
-    action: "collect",
-    target: 5,
-  },
-];
 
 const etmCommand = new SlashCommandBuilder()
   .setName("etm")
-  .setDescription("Theo dõi thành tựu từ các lệnh OWO đã nhận diện.")
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("ghi")
-      .setDescription("Ghi lại hành động bạn vừa hoàn thành.")
-      .addStringOption((option) =>
-        option
-          .setName("hanh-dong")
-          .setDescription("Chọn loại hành động.")
-          .setRequired(true)
-          .addChoices(
-            { name: "Lượt săn", value: "hunt" },
-            { name: "Lượt battle", value: "battle_win" },
-            { name: "Lượt daily", value: "checkin" },
-            { name: "Lượt xem zoo", value: "collect" },
-          ),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName("so-luong")
-          .setDescription("Số lượt muốn ghi nhận (tối đa 20).")
-          .setMinValue(1)
-          .setMaxValue(20),
-      ),
-  )
+  .setDescription("Theo dõi thành tựu từ kết quả OWO ETM xác nhận.")
   .addSubcommand((subcommand) =>
     subcommand
       .setName("tiendo")
@@ -157,12 +80,24 @@ const autoTrackingEnabled = process.env.ETM_AUTO_TRACKING_ENABLED === "true";
 const commandActions: Record<string, ActionKind> = {
   hunt: "hunt",
   h: "hunt",
+  catch: "hunt",
   battle: "battle_win",
   b: "battle_win",
   fight: "battle_win",
   daily: "checkin",
   zoo: "collect",
 };
+const pendingPrefixActions = new Map<
+  string,
+  {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    action: ActionKind;
+    createdAt: number;
+  }
+>();
+const pendingActionTtlMs = 20_000;
 
 type GuildMonitorSettings = typeof etmGuildSettingsTable.$inferSelect;
 
@@ -215,9 +150,7 @@ const saveGuildMonitorSettings = async (
   }
 };
 
-const parseOwoAction = (
-  content: string,
-): ActionKind | null => {
+const parseOwoAction = (content: string): ActionKind | null => {
   const match = content.trimStart().match(/^(?:owo|ow)\s+([a-z][a-z0-9_-]*)\b/i);
   if (!match) {
     return null;
@@ -225,40 +158,83 @@ const parseOwoAction = (
   return commandActions[match[1].toLowerCase()] ?? null;
 };
 
-const getAutomaticAction = (
+const getMessageText = (message: Message): string =>
+  [
+    message.content,
+    ...message.embeds.flatMap((embed) => [
+      embed.title,
+      embed.description,
+      ...embed.fields.flatMap((field) => [field.name, field.value]),
+    ]),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+const responseConfirmsSuccess = (
   message: Message,
-): { userId: string; action: ActionKind } | null => {
-  if (message.author.id === OFFICIAL_OWO_BOT_ID) {
-    const commandName = message.interaction?.commandName.toLowerCase();
-    const action = commandName ? commandActions[commandName] : undefined;
-    const userId = message.interaction?.user.id;
-    return action && userId ? { userId, action } : null;
+  action: ActionKind,
+  userId: string,
+): boolean => {
+  const text = getMessageText(message);
+  if (!text) {
+    return false;
   }
 
-  if (message.author.bot) {
-    return null;
+  const failureSignal =
+    /\b(cooldown|not enough|insufficient|cannot|can't|unable|failed|failure|error|invalid|already claimed|try again|wait \d+|not ready|command usage|usage|syntax|help)\b/i;
+  if (failureSignal.test(text)) {
+    return false;
   }
 
-  const action = parseOwoAction(message.content);
-  return action ? { userId: message.author.id, action } : null;
+  switch (action) {
+    case "hunt":
+      return /\b(you found|found \d+|caught|captured|animal found|animals found)\b/i.test(
+        text,
+      );
+    case "checkin":
+      return (
+        /\bdaily\b/i.test(text) &&
+        /\b(cowoncy|reward|lootbox|weapon crate|claimed)\b/i.test(text)
+      );
+    case "battle_win": {
+      const victory = /\b(you won|victory|winner|won the battle)\b/i.test(text);
+      if (!victory) {
+        return false;
+      }
+      const mentionedUsers = message.mentions.users;
+      return mentionedUsers.size === 0
+        ? /\b(you won|your victory)\b/i.test(text)
+        : mentionedUsers.has(userId);
+    }
+    case "collect":
+      return /\bzoo\b/i.test(text) && /\b(animal|animals|total|zoo)\b/i.test(text);
+  }
 };
 
 const recordAutomaticAction = async (
   guildId: string,
   userId: string,
   action: ActionKind,
+  sourceMessageId: string,
 ): Promise<void> => {
   const entry = insertEtmActionLogSchema.parse({
     guildId,
     userId,
     action,
     amount: 1,
-    sourceMessageId: null,
+    sourceMessageId,
   });
 
-  await db.insert(etmActionLogsTable).values(entry);
+  const inserted = await db
+    .insert(etmActionLogsTable)
+    .values(entry)
+    .onConflictDoNothing({ target: etmActionLogsTable.sourceMessageId })
+    .returning({ id: etmActionLogsTable.id });
 
-  logger.info({ guildId, userId, action }, "Recorded an OwO action");
+  if (inserted.length > 0) {
+    logger.info({ guildId, userId, action }, "Recorded a confirmed OwO result");
+  }
 };
 
 const getActionTotals = async (
@@ -275,6 +251,7 @@ const getActionTotals = async (
       and(
         eq(etmActionLogsTable.guildId, guildId),
         eq(etmActionLogsTable.userId, userId),
+        isNotNull(etmActionLogsTable.sourceMessageId),
       ),
     )
     .groupBy(etmActionLogsTable.action);
@@ -294,11 +271,13 @@ const getActionTotals = async (
 };
 
 const getUnlockedAchievements = (totals: ActionTotals) =>
-  achievements.filter((achievement) => totals[achievement.action] >= achievement.target);
+  etmAchievements.filter(
+    (achievement) => totals[achievement.action] >= achievement.target,
+  );
 
 const formatActionTotals = (totals: ActionTotals): string =>
-  (Object.keys(actionLabels) as ActionKind[])
-    .map((action) => `${actionLabels[action]}: **${totals[action]}**`)
+  (Object.keys(etmActionLabels) as ActionKind[])
+    .map((action) => `${etmActionLabels[action]}: **${totals[action]}**`)
     .join("\n");
 
 const progressEmbed = (totals: ActionTotals): EmbedBuilder => {
@@ -309,16 +288,16 @@ const progressEmbed = (totals: ActionTotals): EmbedBuilder => {
     .setColor(0x26735f)
     .setTitle("Tiến độ của bạn")
     .setDescription(
-      `Tổng lượt ghi nhận: **${totalActions}**\nThành tựu đã mở: **${unlockedCount}/${achievements.length}**`,
+      `Tổng kết quả được xác nhận: **${totalActions}**\nThành tựu đã mở: **${unlockedCount}/${etmAchievements.length}**`,
     )
     .addFields({ name: "Hoạt động", value: formatActionTotals(totals) })
     .setFooter({
-      text: "ETM đếm lệnh đã nhận diện, không xác minh kết quả từ OWO.",
+      text: "Chỉ tính phản hồi OwO được nhận diện là kết quả thành công.",
     });
 };
 
 const achievementsEmbed = (totals: ActionTotals): EmbedBuilder => {
-  const lines = achievements.map((achievement) => {
+  const lines = etmAchievements.map((achievement) => {
     const current = totals[achievement.action];
     const status =
       current >= achievement.target ? "ĐÃ MỞ KHÓA" : "ĐANG THEO DÕI";
@@ -331,56 +310,8 @@ const achievementsEmbed = (totals: ActionTotals): EmbedBuilder => {
     .setTitle("Bộ sưu tập thành tựu ETM")
     .setDescription(lines.join("\n\n"))
     .setFooter({
-      text: "Thành tựu dựa trên lệnh OWO ETM nhận diện được.",
+      text: "Thành tựu mở khi ETM nhận diện kết quả thành công từ OwO.",
     });
-};
-
-const handleRecord = async (
-  interaction: ChatInputCommandInteraction,
-  guildId: string,
-): Promise<void> => {
-  const actionValue = interaction.options.getString("hanh-dong", true);
-  const amount = interaction.options.getInteger("so-luong") ?? 1;
-
-  if (!(actionValue in actionLabels) || amount < 1 || amount > 20) {
-    await interaction.editReply("Thông tin ghi nhận không hợp lệ.");
-    return;
-  }
-
-  const action = actionValue as ActionKind;
-  const before = await getActionTotals(guildId, interaction.user.id);
-  const entry = insertEtmActionLogSchema.parse({
-    guildId,
-    userId: interaction.user.id,
-    action,
-    amount,
-  });
-
-  await db.insert(etmActionLogsTable).values(entry);
-
-  const after = await getActionTotals(guildId, interaction.user.id);
-  const newlyUnlocked = achievements.filter(
-    (achievement) =>
-      before[achievement.action] < achievement.target &&
-      after[achievement.action] >= achievement.target,
-  );
-  const unlockText = newlyUnlocked.length
-    ? newlyUnlocked.map((achievement) => `**${achievement.title}**`).join("\n")
-    : "Chưa mở khóa thành tựu mới lần này.";
-
-  const embed = new EmbedBuilder()
-    .setColor(0x26735f)
-    .setTitle("Đã ghi nhận")
-    .setDescription(
-      `Đã thêm **${amount}** ${actionLabels[action].toLocaleLowerCase("vi-VN")}.`,
-    )
-    .addFields(
-      { name: "Tiến độ hiện tại", value: formatActionTotals(after) },
-      { name: "Thành tựu mới", value: unlockText },
-    )
-    .setFooter({ text: "Ghi nhận thủ công • ETM không tự chạy hoặc xác minh lệnh OWO." });
-
-  await interaction.editReply({ embeds: [embed] });
 };
 
 const handleLeaderboard = async (
@@ -393,7 +324,12 @@ const handleLeaderboard = async (
       total: sql<number>`coalesce(sum(${etmActionLogsTable.amount}), 0)::int`,
     })
     .from(etmActionLogsTable)
-    .where(eq(etmActionLogsTable.guildId, guildId))
+    .where(
+      and(
+        eq(etmActionLogsTable.guildId, guildId),
+        isNotNull(etmActionLogsTable.sourceMessageId),
+      ),
+    )
     .groupBy(etmActionLogsTable.userId)
     .orderBy(desc(sql<number>`sum(${etmActionLogsTable.amount})`))
     .limit(10);
@@ -405,7 +341,7 @@ const handleLeaderboard = async (
             `${index + 1}. <@${row.userId}> — **${Number(row.total)}** lượt`,
         )
         .join("\n")
-    : "Chưa có lượt nào được ghi nhận. Dùng `/etm ghi` để bắt đầu.";
+    : "Chưa có kết quả OwO được ETM xác nhận.";
 
   await interaction.editReply({
     embeds: [
@@ -413,7 +349,7 @@ const handleLeaderboard = async (
         .setColor(0x26735f)
         .setTitle("Bảng xếp hạng server")
         .setDescription(description)
-        .setFooter({ text: "Xếp hạng theo các lệnh OWO ETM nhận diện được." }),
+        .setFooter({ text: "Xếp hạng theo kết quả OwO thành công đã xác nhận." }),
     ],
     allowedMentions: { parse: [] },
   });
@@ -527,10 +463,6 @@ export async function startEtmBot(): Promise<void> {
       }
 
       const subcommand = interaction.options.getSubcommand();
-      if (subcommand === "ghi") {
-        await handleRecord(interaction, interaction.guildId);
-        return;
-      }
 
       if (subcommand === "tiendo") {
         const totals = await getActionTotals(
@@ -585,6 +517,13 @@ export async function startEtmBot(): Promise<void> {
     }
 
     try {
+      const now = Date.now();
+      for (const [messageId, pending] of pendingPrefixActions) {
+        if (now - pending.createdAt > pendingActionTtlMs) {
+          pendingPrefixActions.delete(messageId);
+        }
+      }
+
       const settings = await getGuildMonitorSettings(message.guildId);
       if (
         !settings ||
@@ -593,15 +532,71 @@ export async function startEtmBot(): Promise<void> {
         return;
       }
 
-      const detected = getAutomaticAction(message);
-      if (!detected) {
+      if (message.author.id !== OFFICIAL_OWO_BOT_ID) {
+        if (message.author.bot) {
+          return;
+        }
+        const action = parseOwoAction(message.content);
+        if (!action) {
+          return;
+        }
+        pendingPrefixActions.set(message.id, {
+          guildId: message.guildId,
+          channelId: message.channelId,
+          userId: message.author.id,
+          action,
+          createdAt: now,
+        });
+        return;
+      }
+
+      const commandName = message.interaction?.commandName.toLowerCase();
+      let action = commandName ? commandActions[commandName] : undefined;
+      let userId = message.interaction?.user.id;
+      let pendingMessageId: string | undefined;
+
+      if (!action || !userId) {
+        const referencedId = message.reference?.messageId;
+        let candidates = [...pendingPrefixActions.entries()].filter(
+          ([, pending]) =>
+            pending.guildId === message.guildId &&
+            pending.channelId === message.channelId &&
+            now - pending.createdAt <= pendingActionTtlMs,
+        );
+
+        if (referencedId) {
+          candidates = candidates.filter(([id]) => id === referencedId);
+        } else if (message.mentions.users.size > 0) {
+          candidates = candidates.filter(([, pending]) =>
+            message.mentions.users.has(pending.userId),
+          );
+        }
+
+        if (candidates.length === 1) {
+          const [matchedMessageId, pending] = candidates[0];
+          pendingMessageId = matchedMessageId;
+          action ??= pending.action;
+          userId ??= pending.userId;
+        }
+      }
+
+      if (!action || !userId) {
+        return;
+      }
+
+      const confirmed = responseConfirmsSuccess(message, action, userId);
+      if (pendingMessageId) {
+        pendingPrefixActions.delete(pendingMessageId);
+      }
+      if (!confirmed) {
         return;
       }
 
       await recordAutomaticAction(
         message.guildId,
-        detected.userId,
-        detected.action,
+        userId,
+        action,
+        message.id,
       );
     } catch (err) {
       logger.error(

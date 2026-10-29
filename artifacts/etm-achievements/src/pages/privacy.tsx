@@ -1,0 +1,23 @@
+import { Link } from 'wouter';
+import { ArrowLeft, ShieldCheck } from 'lucide-react';
+
+export default function Privacy() {
+  return <main className="legal-page" data-testid="page-privacy">
+    <header className="legal-topbar"><Link href="/" className="legal-brand" data-testid="link-home-privacy"><span className="brand-mark">ETM</span><span>Thành tựu của tôi</span></Link><Link href="/" className="back-link" data-testid="link-back-home-privacy"><ArrowLeft size={15} /> Về trang chủ</Link></header>
+    <article className="legal-document">
+      <div className="legal-eyebrow"><ShieldCheck size={14} /> MINH BẠCH DỮ LIỆU · VIỆT NAM</div>
+      <h1>Chính sách quyền riêng tư</h1>
+      <p className="legal-lede">Cách ETM xử lý thông tin khi bạn theo dõi thành tựu cá nhân hoặc kết nối Discord.</p>
+      <div className="legal-disclaimer" role="note" data-testid="legal-disclaimer-privacy"><strong>Lưu ý pháp lý</strong><p>Đây là bản dự thảo thông tin chung, không phải tư vấn pháp lý. Vui lòng nhờ luật sư có đủ chuyên môn tại Việt Nam xem xét trước khi áp dụng.</p></div>
+      <div className="legal-meta">BẢN DỰ THẢO · HIỆU LỰC KHI ĐƯỢC ĐĂNG TẢI</div>
+      <section><h2>1. Người vận hành và liên hệ</h2><p>ETM là dự án cộng đồng độc lập do VinCat vận hành tại Việt Nam. Để hỏi về quyền riêng tư hoặc yêu cầu hỗ trợ dữ liệu, liên hệ <a href="mailto:tannguyenthanh498@gmail.com">tannguyenthanh498@gmail.com</a>.</p></section>
+      <section><h2>2. Thông tin được xử lý</h2><ul><li><strong>Discord OAuth:</strong> khi bạn kết nối, ETM nhận thông tin định danh Discord cần thiết như Discord user ID, tên người dùng, tên hiển thị và ảnh đại diện nếu có, nhằm xác thực phiên và gắn tiến trình với tài khoản.</li><li><strong>Dữ liệu bot quan sát:</strong> Discord user ID, guild/server ID, loại hành động được nhận diện, số lượng, thời điểm và ID tin nhắn nguồn được giữ lại để chống ghi nhận trùng lặp. ETM chỉ xử lý trong phạm vi kênh đã cấu hình. Nội dung văn bản thô được phân tích tạm thời để nhận diện và không được lưu trữ.</li><li><strong>Dữ liệu thủ công:</strong> tên hiển thị, bộ đếm, nhật ký và thành tựu bạn tự nhập được lưu cục bộ trong trình duyệt, không đồng bộ thành dữ liệu Discord. Dữ liệu này có thể còn trên thiết bị sau khi đăng xuất hoặc xóa dữ liệu đồng bộ.</li></ul><p>Không phải mọi kết quả OwO đều có thể được quan sát hoặc nhận diện. Tiến trình hiển thị không nên được hiểu là nhật ký đầy đủ mọi hoạt động.</p></section>
+      <section><h2>3. Mục đích sử dụng</h2><p>Thông tin được dùng để đăng nhập, hiển thị tiến trình đã đồng bộ, duy trì chức năng của ETM, xử lý yêu cầu xóa và bảo vệ hoạt động của dịch vụ. ETM không lưu trữ nội dung tin nhắn thô.</p></section>
+      <section><h2>4. Nhà cung cấp và xử lý bên ngoài</h2><ul><li><strong>Discord:</strong> xử lý OAuth và cung cấp thông tin tài khoản; các hoạt động trong máy chủ Discord vẫn chịu chính sách riêng của Discord.</li><li><strong>Replit:</strong> lưu trữ và vận hành ứng dụng ETM.</li><li><strong>PostgreSQL:</strong> lưu các bản ghi hoạt động ETM đã đồng bộ, không lưu hồ sơ người dùng.</li><li><strong>Google Fonts / Google:</strong> trang có thể tải phông chữ từ Google Fonts; trình duyệt của bạn kết nối tới Google để tải tài nguyên phông chữ.</li></ul></section>
+      <section><h2>5. Lưu trữ, thời hạn và bảo vệ</h2><p>Dữ liệu đồng bộ được lưu trên hạ tầng ứng dụng và cơ sở dữ liệu PostgreSQL để cung cấp tiến trình của bạn. Dữ liệu thủ công nằm trong bộ nhớ trình duyệt của thiết bị. ETM áp dụng các biện pháp kỹ thuật và vận hành phù hợp với quy mô dự án; không có hệ thống truyền hoặc lưu trữ nào được bảo đảm an toàn tuyệt đối.</p></section>
+      <section><h2>6. Truy cập và xóa dữ liệu</h2><p>Bạn có thể xem tiến trình Discord đã đồng bộ trên dashboard và dùng chức năng xóa hoạt động ETM tại đó. Việc này không xóa dữ liệu thủ công trong trình duyệt. Bạn cũng có thể gửi yêu cầu truy cập hoặc xóa dữ liệu tới <a href="mailto:tannguyenthanh498@gmail.com">tannguyenthanh498@gmail.com</a>. ETM sẽ xử lý yêu cầu hợp lý sau khi xác minh tài khoản khi cần.</p></section>
+      <section><h2>7. Cookie, trẻ vị thành niên và cập nhật</h2><p>Phiên xác thực Discord có thể sử dụng cookie cần thiết cho đăng nhập; ETM không mô tả hoặc sử dụng cookie quảng cáo trong chính sách này. Người dùng phải tuân thủ giới hạn độ tuổi của Discord và các quy định áp dụng. Chính sách có thể được điều chỉnh; nội dung mới sẽ được đăng tại trang này.</p></section>
+      <footer className="legal-footer"><Link href="/" data-testid="link-home-privacy-bottom">Trang chủ</Link><Link href="/terms" data-testid="link-terms-from-privacy">Điều khoản sử dụng</Link><a href="mailto:tannguyenthanh498@gmail.com">Liên hệ quyền riêng tư</a></footer>
+    </article>
+  </main>;
+}

@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Discord account session operations
+  - name: etm
+    description: ETM progress operations
 paths:
   /healthz:
     get:
@@ -24,7 +28,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: Get the current Discord session
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /auth/logout:
+    post:
+      operationId: logoutDiscord
+      tags: [auth]
+      summary: End the current Discord session
+      responses:
+        "200":
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResponse"
+  /etm/progress:
+    get:
+      operationId: getEtmProgress
+      tags: [etm]
+      summary: Get the authenticated user's ETM progress
+      security:
+        - EtmSessionCookie: []
+      responses:
+        "200":
+          description: Progress from all servers where ETM recorded activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtmProgress"
+        "401":
+          description: Discord login required
+    delete:
+      operationId: deleteEtmProgress
+      tags: [etm]
+      summary: Delete the authenticated user's ETM activity records
+      security:
+        - EtmSessionCookie: []
+      responses:
+        "204":
+          description: Activity records deleted
+        "401":
+          description: Discord login required
 components:
+  securitySchemes:
+    EtmSessionCookie:
+      type: apiKey
+      in: cookie
+      name: etm_session
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +93,96 @@ components:
           type: string
       required:
         - status
+    ActionKind:
+      type: string
+      enum: [hunt, battle_win, checkin, collect]
+    DiscordUser:
+      type: object
+      required: [id, username, globalName, avatarUrl]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        globalName:
+          type: [string, "null"]
+        avatarUrl:
+          type: [string, "null"]
+    AuthSession:
+      type: object
+      required: [authenticated, user]
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          anyOf:
+            - $ref: "#/components/schemas/DiscordUser"
+            - type: "null"
+    LogoutResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+    EtmTotals:
+      type: object
+      required: [hunt, battle_win, checkin, collect]
+      properties:
+        hunt:
+          type: integer
+        battle_win:
+          type: integer
+        checkin:
+          type: integer
+        collect:
+          type: integer
+    EtmAchievement:
+      type: object
+      required: [id, title, description, action, target, current, unlocked]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        action:
+          $ref: "#/components/schemas/ActionKind"
+        target:
+          type: integer
+        current:
+          type: integer
+        unlocked:
+          type: boolean
+    EtmRecentAction:
+      type: object
+      required: [id, action, amount, createdAt]
+      properties:
+        id:
+          type: integer
+        action:
+          $ref: "#/components/schemas/ActionKind"
+        amount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    EtmProgress:
+      type: object
+      required: [totals, totalActions, guildCount, achievements, recentActions]
+      properties:
+        totals:
+          $ref: "#/components/schemas/EtmTotals"
+        totalActions:
+          type: integer
+        guildCount:
+          type: integer
+        achievements:
+          type: array
+          items:
+            $ref: "#/components/schemas/EtmAchievement"
+        recentActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EtmRecentAction"
 

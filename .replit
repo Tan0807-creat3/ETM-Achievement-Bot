@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -24,3 +24,6 @@ timeoutMs = 20000
 [userenv.shared]
 ETM_AUTO_TRACKING_ENABLED = "true"
 DISCORD_CLIENT_ID = "1565014845403959326"
+
+[nix]
+channel = "stable-25_05"
